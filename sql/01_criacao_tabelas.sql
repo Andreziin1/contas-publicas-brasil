@@ -33,3 +33,11 @@ CREATE TABLE ipca (
     FOREIGN KEY (id_periodo) REFERENCES periodo(id_periodo),
     FOREIGN KEY (id_fonte) REFERENCES fonte_dados(id_fonte)
 );
+CREATE TABLE divida_bruta (
+    id_divida INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_periodo INTEGER NOT NULL UNIQUE,
+    id_fonte INTEGER NOT NULL,
+    divida_bruta_pib NUMERIC(5,2) NOT NULL,
+    FOREIGN KEY (id_periodo) REFERENCES periodo(id_periodo),
+    FOREIGN KEY (id_fonte) REFERENCES fonte_dados(id_fonte)
+);

@@ -365,3 +365,307 @@ JOIN dados_fiscais df
 
 GROUP BY p.ano
 ORDER BY p.ano;
+
+-- Pergunta 11:
+-- Como a Dívida Bruta do Governo Geral (% do PIB) evoluiu ao longo dos anos?
+
+SELECT
+    p.ano,
+    ROUND(db.divida_bruta_pib, 2) AS divida_bruta_pib
+FROM periodo p
+JOIN divida_bruta db
+    ON p.id_periodo = db.id_periodo
+WHERE p.mes = 12
+ORDER BY p.ano;
+
+-- Pergunta 12:
+-- Quanto a Dívida Bruta (% do PIB) aumentou ou diminuiu em relação ao ano anterior?
+
+WITH divida_anual AS (
+    SELECT
+        p.ano,
+        db.divida_bruta_pib
+    FROM periodo p
+    JOIN divida_bruta db
+        ON p.id_periodo = db.id_periodo
+    WHERE p.mes = 12
+)
+SELECT
+    ano,
+    ROUND(divida_bruta_pib, 2) AS divida_bruta_pib,
+    ROUND(
+        divida_bruta_pib -
+        LAG(divida_bruta_pib) OVER (ORDER BY ano),
+        2
+    ) AS variacao_pontos_percentuais
+FROM divida_anual
+ORDER BY ano;
+
+-- Pergunta 13:
+-- Quais anos apresentaram as maiores mudanças na Dívida Bruta (% do PIB)?
+
+WITH divida_anual AS (
+    SELECT
+        p.ano,
+        db.divida_bruta_pib
+    FROM periodo p
+    JOIN divida_bruta db
+        ON p.id_periodo = db.id_periodo
+    WHERE p.mes = 12
+),
+variacoes AS (
+    SELECT
+        ano,
+        divida_bruta_pib,
+        divida_bruta_pib -
+        LAG(divida_bruta_pib) OVER (ORDER BY ano) AS variacao
+    FROM divida_anual
+)
+SELECT
+    ano,
+    ROUND(divida_bruta_pib, 2) AS divida_bruta_pib,
+    ROUND(variacao, 2) AS variacao_pontos_percentuais
+FROM variacoes
+WHERE variacao IS NOT NULL
+ORDER BY ABS(variacao) DESC;
+
+-- Pergunta 14:
+-- Como o Resultado Primário e a Dívida Bruta (% do PIB) se comportaram no mesmo período?
+
+SELECT
+    p.ano,
+    ROUND(SUM(df.resultado_primario), 2) AS resultado_primario_rs_milhoes,
+    ROUND(
+        MAX(CASE
+            WHEN p.mes = 12 THEN db.divida_bruta_pib
+        END),
+        2
+    ) AS divida_bruta_pib
+FROM periodo p
+JOIN dados_fiscais df
+    ON p.id_periodo = df.id_periodo
+LEFT JOIN divida_bruta db
+    ON p.id_periodo = db.id_periodo
+WHERE p.ano >= 2007
+GROUP BY p.ano
+ORDER BY p.ano;
+
+-- Pergunta 15:
+-- Como a variação anual da Dívida Bruta (% do PIB) se compara ao Resultado Primário de cada ano?
+
+WITH valores_anuais AS (
+    SELECT
+        p.ano,
+        SUM(df.resultado_primario) AS resultado_primario,
+        MAX(CASE
+            WHEN p.mes = 12 THEN db.divida_bruta_pib
+        END) AS divida_bruta_pib
+    FROM periodo p
+    JOIN dados_fiscais df
+        ON p.id_periodo = df.id_periodo
+    LEFT JOIN divida_bruta db
+        ON p.id_periodo = db.id_periodo
+    WHERE p.ano >= 2006
+    GROUP BY p.ano
+),
+comparacao AS (
+    SELECT
+        ano,
+        resultado_primario,
+        divida_bruta_pib,
+        divida_bruta_pib -
+        LAG(divida_bruta_pib) OVER (ORDER BY ano) AS variacao_divida
+    FROM valores_anuais
+)
+SELECT
+    ano,
+    ROUND(resultado_primario, 2) AS resultado_primario_rs_milhoes,
+    ROUND(divida_bruta_pib, 2) AS divida_bruta_pib,
+    ROUND(variacao_divida, 2) AS variacao_divida_pontos_percentuais
+FROM comparacao
+WHERE variacao_divida IS NOT NULL
+ORDER BY ano;
+
+-- Pergunta 16:
+-- Em quais anos Receita e Despesa cresceram acima ou abaixo do IPCA, e como o Resultado Primário e a Dívida Bruta se comportaram nesses mesmos anos?
+
+WITH valores_anuais AS (
+    SELECT
+        p.ano,
+        SUM(df.receita_total) AS receita_total,
+        SUM(df.despesa_total) AS despesa_total,
+        SUM(df.resultado_primario) AS resultado_primario,
+        MAX(CASE
+            WHEN p.mes = 12 THEN i.ipca_acumulado_ano
+        END) AS ipca_acumulado_ano,
+        MAX(CASE
+            WHEN p.mes = 12 THEN db.divida_bruta_pib
+        END) AS divida_bruta_pib
+    FROM periodo p
+    JOIN dados_fiscais df
+        ON p.id_periodo = df.id_periodo
+    JOIN ipca i
+        ON p.id_periodo = i.id_periodo
+    LEFT JOIN divida_bruta db
+        ON p.id_periodo = db.id_periodo
+    GROUP BY p.ano
+),
+comparacao AS (
+    SELECT
+        ano,
+        receita_total,
+        despesa_total,
+        resultado_primario,
+        ipca_acumulado_ano,
+        divida_bruta_pib,
+        LAG(receita_total) OVER (ORDER BY ano) AS receita_ano_anterior,
+        LAG(despesa_total) OVER (ORDER BY ano) AS despesa_ano_anterior,
+        LAG(divida_bruta_pib) OVER (ORDER BY ano) AS divida_ano_anterior
+    FROM valores_anuais
+)
+SELECT
+    ano,
+    ROUND(
+        ((receita_total - receita_ano_anterior)
+        / NULLIF(receita_ano_anterior, 0)) * 100,
+        2
+    ) AS crescimento_receita_percentual,
+    ROUND(
+        ((despesa_total - despesa_ano_anterior)
+        / NULLIF(despesa_ano_anterior, 0)) * 100,
+        2
+    ) AS crescimento_despesa_percentual,
+    ipca_acumulado_ano,
+    CASE
+        WHEN ((receita_total - receita_ano_anterior)
+            / NULLIF(receita_ano_anterior, 0)) * 100 > ipca_acumulado_ano
+            THEN 'Acima do IPCA'
+        ELSE 'Abaixo do IPCA'
+    END AS receita_vs_ipca,
+    CASE
+        WHEN ((despesa_total - despesa_ano_anterior)
+            / NULLIF(despesa_ano_anterior, 0)) * 100 > ipca_acumulado_ano
+            THEN 'Acima do IPCA'
+        ELSE 'Abaixo do IPCA'
+    END AS despesa_vs_ipca,
+    ROUND(resultado_primario, 2) AS resultado_primario_rs_milhoes,
+    ROUND(divida_bruta_pib, 2) AS divida_bruta_pib,
+    ROUND(divida_bruta_pib - divida_ano_anterior, 2)
+        AS variacao_divida_pontos_percentuais
+FROM comparacao
+WHERE ano >= 2007
+ORDER BY ano;
+
+-- Pergunta 17:
+-- Como Resultado Primário, IPCA e Dívida Bruta se comportaram nos anos de maior crescimento das Despesas?
+
+WITH valores_anuais AS (
+    SELECT
+        p.ano,
+        SUM(df.despesa_total) AS despesa_total,
+        SUM(df.resultado_primario) AS resultado_primario,
+        MAX(CASE
+            WHEN p.mes = 12 THEN i.ipca_acumulado_ano
+        END) AS ipca_acumulado_ano,
+        MAX(CASE
+            WHEN p.mes = 12 THEN db.divida_bruta_pib
+        END) AS divida_bruta_pib
+    FROM periodo p
+    JOIN dados_fiscais df
+        ON p.id_periodo = df.id_periodo
+    JOIN ipca i
+        ON p.id_periodo = i.id_periodo
+    LEFT JOIN divida_bruta db
+        ON p.id_periodo = db.id_periodo
+    GROUP BY p.ano
+),
+comparacao AS (
+    SELECT
+        ano,
+        despesa_total,
+        resultado_primario,
+        ipca_acumulado_ano,
+        divida_bruta_pib,
+        LAG(despesa_total) OVER (ORDER BY ano) AS despesa_ano_anterior,
+        LAG(divida_bruta_pib) OVER (ORDER BY ano) AS divida_ano_anterior
+    FROM valores_anuais
+)
+SELECT
+    ano,
+    ROUND(
+        ((despesa_total - despesa_ano_anterior)
+        / NULLIF(despesa_ano_anterior, 0)) * 100,
+        2
+    ) AS crescimento_despesa_percentual,
+    ROUND(resultado_primario, 2) AS resultado_primario_rs_milhoes,
+    ipca_acumulado_ano,
+    ROUND(divida_bruta_pib, 2) AS divida_bruta_pib,
+    ROUND(divida_bruta_pib - divida_ano_anterior, 2)
+        AS variacao_divida_pontos_percentuais
+FROM comparacao
+WHERE ano >= 2007
+ORDER BY crescimento_despesa_percentual DESC
+LIMIT 5;
+
+-- Pergunta 18:
+-- Como os principais indicadores fiscais variaram conjuntamente ao longo dos anos?
+
+WITH valores_anuais AS (
+    SELECT
+        p.ano,
+        SUM(df.receita_total) AS receita_total,
+        SUM(df.despesa_total) AS despesa_total,
+        SUM(df.resultado_primario) AS resultado_primario,
+        MAX(CASE
+            WHEN p.mes = 12 THEN i.ipca_acumulado_ano
+        END) AS ipca_acumulado_ano,
+        MAX(CASE
+            WHEN p.mes = 12 THEN db.divida_bruta_pib
+        END) AS divida_bruta_pib
+    FROM periodo p
+    JOIN dados_fiscais df
+        ON p.id_periodo = df.id_periodo
+    JOIN ipca i
+        ON p.id_periodo = i.id_periodo
+    LEFT JOIN divida_bruta db
+        ON p.id_periodo = db.id_periodo
+    GROUP BY p.ano
+),
+comparacao AS (
+    SELECT
+        ano,
+        receita_total,
+        despesa_total,
+        resultado_primario,
+        ipca_acumulado_ano,
+        divida_bruta_pib,
+        LAG(receita_total) OVER (ORDER BY ano) AS receita_ano_anterior,
+        LAG(despesa_total) OVER (ORDER BY ano) AS despesa_ano_anterior,
+        LAG(resultado_primario) OVER (ORDER BY ano) AS resultado_ano_anterior,
+        LAG(divida_bruta_pib) OVER (ORDER BY ano) AS divida_ano_anterior
+    FROM valores_anuais
+)
+SELECT
+    ano,
+    ROUND(
+        ((receita_total - receita_ano_anterior)
+        / NULLIF(receita_ano_anterior, 0)) * 100,
+        2
+    ) AS variacao_receita_percentual,
+    ROUND(
+        ((despesa_total - despesa_ano_anterior)
+        / NULLIF(despesa_ano_anterior, 0)) * 100,
+        2
+    ) AS variacao_despesa_percentual,
+    ROUND(
+        resultado_primario - resultado_ano_anterior,
+        2
+    ) AS variacao_resultado_primario_rs_milhoes,
+    ipca_acumulado_ano,
+    ROUND(
+        divida_bruta_pib - divida_ano_anterior,
+        2
+    ) AS variacao_divida_pontos_percentuais
+FROM comparacao
+WHERE ano >= 2007
+ORDER BY ano;
